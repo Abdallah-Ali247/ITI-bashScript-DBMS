@@ -46,7 +46,7 @@ function connect_database() {
     # check if db is exist dir
     if [[ -d "$DB_DIR/$dbname" ]]; then
         echo -e "\nConnected to database '$dbname'."
-        # Placeholder for database menu (to be implemented next)
+        database_menu "$dbname"
     else
         echo -e "\nError: Database '$dbname' does not exist!"
     fi
@@ -74,6 +74,82 @@ function drop_database() {
         echo -e "\nError: Database '$dbname' does not exist!"
     fi
 }
+
+
+# create a new table
+function create_table() {
+    local dbname="$1"
+    read -p "Enter table name: " tablename
+    #check if var is not empty
+    if [[ -z "$tablename" ]]; then
+
+        echo -e "\nError: Table name cannot be empty!"
+        return
+    fi
+    #check if the file exist
+    if [[ -f "$DB_DIR/$dbname/$tablename" ]]; then
+        echo -e "\nError: Table '$tablename' already exists!"
+    else
+        touch "$DB_DIR/$dbname/$tablename"
+        echo -e "\nTable '$tablename' created successfully."
+    fi
+}
+
+# list tables in a database
+function list_tables() {
+    local dbname="$1"
+    echo -e "\nTables in database '$dbname':"
+    ls "$DB_DIR/$dbname"
+}
+
+# drop table
+function drop_table() {
+    local dbname="$1"
+    read -p "Enter table name to delete: " tablename
+    if [[ -f "$DB_DIR/$dbname/$tablename" ]]; then
+        
+        read -p "Are you sure you want to delete '$tablename'? (y/n): " confirm
+       
+        if [[ "$confirm" == "y" ]]; then
+            rm "$DB_DIR/$dbname/$tablename"
+            echo -e "\nTable '$tablename' deleted successfully."
+        else
+            echo -e "\nOperation cancelled."
+        fi
+    else
+        echo -e "\nError: Table '$tablename' does not exist!"
+    fi
+}
+
+
+# Database Menu Function
+function database_menu() {
+    local dbname="$1"
+    while true; do
+        clear
+        echo "========================="
+        echo "  Database: $dbname  "
+        echo "========================="
+        echo "1) Create Table"
+        echo "2) List Tables"
+        echo "3) Drop Table"
+        echo "4) Back to Main Menu"
+        echo "========================="
+        read -p "Enter your choice: " choice
+
+        case $choice in
+            1) create_table "$dbname" ;;
+            2) list_tables "$dbname" ;;
+            3) drop_table "$dbname" ;;
+            4) return ;;
+            *) echo "Invalid option. Please try again." ;;
+        esac
+
+        echo -e "\n"
+        read -p "Press Enter to continue..."
+    done
+}
+
 
 # **************************************************************************************
 # ********************************* Main Menu Function *********************************
