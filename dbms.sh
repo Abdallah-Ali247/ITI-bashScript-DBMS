@@ -275,7 +275,53 @@ function insert_into_table() {
     echo -e "\nRow inserted successfully."
 }
 
+# **********************************************************
+# Function to select and display data from a table *******
+# **********************************************************
 
+function select_from_table() {
+    local dbname="$1"
+    read -p "Enter table name: " tablename
+
+    local table_file="$DB_DIR/$dbname/$tablename"
+    local schema_file="$table_file.meta"
+
+    if [[ ! -f "$table_file" || ! -f "$schema_file" ]]; then
+        echo "Error: Table '$tablename' does not exist!"
+        return
+    fi
+
+    # Read schema
+    schema=$(head -n 1 "$schema_file")
+    IFS='|' read -ra columns <<< "$schema"
+
+
+    declare -a col_names
+    for col_def in "${columns[@]}"; do
+        IFS=':' read -r col_name _ <<< "$col_def"
+        [[ "$col_name" == "PK" ]] && continue
+        col_names+=("$col_name")
+    done
+
+    # Print table header
+    echo "--------------------------------------------------------------"
+    for col_name in "${col_names[@]}"; do
+        printf "%-15s" "$col_name"
+    done
+    echo
+    echo "--------------------------------------------------------------"
+
+    # Print rows
+    while IFS='|' read -r row_data; do
+        IFS='|' read -ra values <<< "$row_data"
+        for value in "${values[@]}"; do
+            printf "%-15s" "$value"
+        done
+        echo
+    done < "$table_file"
+
+    echo "--------------------------------------------------------------"
+}
 
 
 # **************************************************
@@ -293,8 +339,9 @@ function database_menu() {
         echo "2) List Tables"
         echo "3) Show Table Schema"
         echo "4) Insert into Table"
-        echo "5) Drop Table"
-        echo "6) Back to Main Menu"
+        echo "5) Select From Table"
+        echo "6) Drop Table"
+        echo "7) Back to Main Menu"
         echo "========================="
         read -p "Enter your choice: " choice
 
@@ -303,8 +350,9 @@ function database_menu() {
             2) list_tables "$dbname" ;;
             3) show_table_schema "$dbname" ;;
             4) insert_into_table "$dbname" ;;
-            5) drop_table "$dbname" ;;
-            6) return ;;
+            5) select_from_table "$dbname" ;;
+            6) drop_table "$dbname" ;;
+            7) return ;;
             *) echo "Invalid option. Please try again." ;;
         esac
 
