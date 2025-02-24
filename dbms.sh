@@ -58,6 +58,7 @@ function connect_database() {
 
 function drop_database() {
     # store user input at `dbname`
+    echo -e "\n"
     read -p "Enter database name to delete: " dbname
     # check if `dbname` is a dir
     if [[ -d "$DB_DIR/$dbname" ]]; then
@@ -75,10 +76,17 @@ function drop_database() {
     fi
 }
 
+# /////////////////////////////////////////////////////
+# /////////////////////////////////////////////////////
+# /////////////////////////////////////////////////////
 
-# create a new table
+# **************************************************
+# *************** create a new table ***************
+# **************************************************
+
 function create_table() {
     local dbname="$1"
+    echo -e "\n"
     read -p "Enter table name: " tablename
     #check if var is not empty
     if [[ -z "$tablename" ]]; then
@@ -89,20 +97,92 @@ function create_table() {
     #check if the file exist
     if [[ -f "$DB_DIR/$dbname/$tablename" ]]; then
         echo -e "\nError: Table '$tablename' already exists!"
-    else
-        touch "$DB_DIR/$dbname/$tablename"
-        echo -e "\nTable '$tablename' created successfully."
+        return
     fi
+
+    # Ask for column details
+    echo -e "\n"
+    read -p "Enter number of columns: " col_count
+    if ! [[ "$col_count" =~ ^[1-9][0-9]*$ ]]; then
+        echo -e "\nError: Column count must be a positive number!"
+        return
+    fi
+
+    schema=""
+    pk_column=""
+    for (( i=1; i<=col_count; i++ )); do
+        echo -e "\n"
+        read -p "Enter name for column $i: " col_name
+        echo -e "\n"
+        read -p "Enter data type for column $i (string/int): " col_type
+        if [[ "$col_type" != "string" && "$col_type" != "int" ]]; then
+            echo -e "\nError: Data type must be 'string' or 'int'!"
+            return
+        fi
+
+        # Ask if this column is the primary key
+        if [[ -z "$pk_column" ]]; then
+            echo -e "\n"
+            read -p "Should this column be the PRIMARY KEY? (y/n): " is_pk
+            if [[ "$is_pk" == "y" ]]; then
+                pk_column="$col_name"
+            fi
+        fi
+
+        schema+="$col_name:$col_type|"
+    done
+
+    # Ensure at least one primary key
+    if [[ -z "$pk_column" ]]; then
+        echo -e "\nError: You must define a primary key!"
+        return
+    fi
+
+    # Save schema metadata
+    schema+="PK:$pk_column"
+    echo -e "\n"
+    echo "$schema" > "$DB_DIR/$dbname/$tablename.meta"
+    touch "$DB_DIR/$dbname/$tablename"  # Create data file
+    echo -e "\nTable '$tablename' created successfully with schema."
 }
 
-# list tables in a database
+# **************************************************
+# **************** list tables in a database *******
+# **************************************************
+
 function list_tables() {
     local dbname="$1"
     echo -e "\nTables in database '$dbname':"
-    ls "$DB_DIR/$dbname"
+    # ls "$DB_DIR/$dbname"
+    for table in "$DB_DIR/$dbname"/*.meta; do
+        if [[ -f "$table" ]]; then
+            tablename=$(basename "$table" .meta)
+            schema=$(head -n 1 "$table")
+            echo "- $tablename ($schema)"
+        fi
+    done
 }
 
-# drop table
+# ***************************************************
+# ******** Function to show table schema ************
+# ***************************************************
+
+function show_table_schema() {
+    local dbname="$1"
+    echo -e "\n"
+    read -p "Enter table name: " tablename
+    if [[ ! -f "$DB_DIR/$dbname/$tablename.meta" ]]; then
+        echo -e "\nError: Table '$tablename' does not exist!"
+        return
+    fi
+    echo -e "\nSchema for table '$tablename':"
+    cat "$DB_DIR/$dbname/$tablename.meta"
+}
+
+# **************************************************
+# ********************* drop table *****************
+# **************************************************
+
 function drop_table() {
     local dbname="$1"
     read -p "Enter table name to delete: " tablename
@@ -112,6 +192,8 @@ function drop_table() {
        
         if [[ "$confirm" == "y" ]]; then
             rm "$DB_DIR/$dbname/$tablename"
+            rm "$DB_DIR/$dbname/$tablename.meta"
+
             echo -e "\nTable '$tablename' deleted successfully."
         else
             echo -e "\nOperation cancelled."
@@ -122,7 +204,84 @@ function drop_table() {
 }
 
 
-# Database Menu Function
+# *********************************************************
+# ******** Function to insert data into a table ***********
+# *********************************************************
+
+function insert_into_table() {
+    local dbname="$1"
+    echo -e "\n"
+    read -p "Enter table name: " tablename
+
+    local table_file="$DB_DIR/$dbname/$tablename"
+    local schema_file="$table_file.meta"
+
+    if [[ ! -f "$table_file" || ! -f "$schema_file" ]]; then
+        echo -e "\nError: Table '$tablename' does not exist!"
+        return
+    fi
+
+    # Read schema
+    schema=$(head -n 1 "$schema_file")
+    IFS='|' read -ra columns <<< "$schema"
+
+    declare -A row_data
+    pk_column=""
+    pk_value=""
+
+    # Read input values
+    for col_def in "${columns[@]}"; do
+        IFS=':' read -r col_name col_type <<< "$col_def"
+
+        if [[ "$col_name" == "PK" ]]; then
+            pk_column="$col_type"
+            continue
+        fi
+
+        echo -e "\n"
+        read -p "Enter value for $col_name ($col_type): " value
+
+        # Validate data type
+        if [[ "$col_type" == "int" && ! "$value" =~ ^[0-9]+$ ]]; then
+            echo -e "\nError: '$col_name' must be an integer!"
+            return
+        fi
+
+        # Store value
+        row_data["$col_name"]="$value"
+
+        # Check if it's the primary key
+        if [[ "$col_name" == "$pk_column" ]]; then
+            pk_value="$value"
+        fi
+    done
+
+    # Check for duplicate primary key
+    if grep -q "^$pk_value|" "$table_file"; then
+        echo -e "\nError: Primary key '$pk_value' already exists!"
+        return
+    fi
+
+    # Construct row string
+    row=""
+    for col_def in "${columns[@]}"; do
+        IFS=':' read -r col_name _ <<< "$col_def"
+        [[ "$col_name" == "PK" ]] && continue
+        row+="${row_data[$col_name]}|"
+    done
+
+    # Save row
+    echo "${row%|}" >> "$table_file"
+    echo -e "\nRow inserted successfully."
+}
+
+
+
+
+# **************************************************
+# ****************** Database Menu Function ********
+# **************************************************
+
 function database_menu() {
     local dbname="$1"
     while true; do
@@ -132,16 +291,20 @@ function database_menu() {
         echo "========================="
         echo "1) Create Table"
         echo "2) List Tables"
-        echo "3) Drop Table"
-        echo "4) Back to Main Menu"
+        echo "3) Show Table Schema"
+        echo "4) Insert into Table"
+        echo "5) Drop Table"
+        echo "6) Back to Main Menu"
         echo "========================="
         read -p "Enter your choice: " choice
 
         case $choice in
             1) create_table "$dbname" ;;
             2) list_tables "$dbname" ;;
-            3) drop_table "$dbname" ;;
-            4) return ;;
+            3) show_table_schema "$dbname" ;;
+            4) insert_into_table "$dbname" ;;
+            5) drop_table "$dbname" ;;
+            6) return ;;
             *) echo "Invalid option. Please try again." ;;
         esac
 
@@ -149,6 +312,11 @@ function database_menu() {
         read -p "Press Enter to continue..."
     done
 }
+
+
+
+
+
 
 
 # **************************************************************************************
