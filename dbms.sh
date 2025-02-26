@@ -276,7 +276,7 @@ function insert_into_table() {
 }
 
 # **********************************************************
-# Function to select and display data from a table *******
+# ** Function to select and display data from a table ******
 # **********************************************************
 
 function select_from_table() {
@@ -324,6 +324,160 @@ function select_from_table() {
 }
 
 
+# *******************************************************
+# ****************** Delete from table ******************
+# *******************************************************
+
+function delete_from_table() {
+    local dbname="$1"
+    read -p "Enter table name: " tablename
+
+    local table_file="$DB_DIR/$dbname/$tablename"
+    local schema_file="$table_file.meta"
+
+    if [[ ! -f "$table_file" || ! -f "$schema_file" ]]; then
+        echo "Error: Table '$tablename' does not exist!"
+        return
+    fi
+
+    # Get primary key column
+    schema=$(head -n 1 "$schema_file")
+    IFS='|' read -ra columns <<< "$schema"
+
+    pk_column=""
+    for col_def in "${columns[@]}"; do
+        IFS=':' read -r col_name _ <<< "$col_def"
+        if [[ "$col_name" == "PK" ]]; then
+            pk_column="$col_type"
+            continue
+        fi
+    done
+
+    if [[ -z "$pk_column" ]]; then
+        echo "Error: No primary key defined!"
+        return
+    fi
+
+    # Ask user for PK value
+    read -p "Enter $pk_column to delete: " pk_value
+
+    # Filter out the row with matching PK and update the file
+    if grep -q "^$pk_value|" "$table_file"; then
+        grep -v "^$pk_value|" "$table_file" > "$table_file.tmp" && mv "$table_file.tmp" "$table_file"
+        echo "Row with $pk_column = $pk_value deleted successfully."
+    else
+        echo "Error: No matching record found."
+    fi
+}
+
+
+
+# ************************************************************
+# **************** Update Table ******************************
+# ************************************************************
+
+function update_from_table() {
+    local dbname="$1"
+    read -p "Enter table name: " tablename
+    local table_file="$DB_DIR/$dbname/$tablename"
+    local schema_file="$table_file.meta"
+    if [[ ! -f "$table_file" || ! -f "$schema_file" ]]; then
+        echo -e "\nError: Table '$tablename' does not exist!"
+        return
+    fi
+
+    # Read schema to get PK and columns
+    schema=$(head -n 1 "$schema_file")
+    IFS='|' read -ra columns <<< "$schema"
+    pk_column=""
+    declare -A column_types
+    for col_def in "${columns[@]}"; do
+        IFS=':' read -r col_name col_type <<< "$col_def"
+        if [[ "$col_name" == "PK" ]]; then
+            pk_column="$col_type"
+            continue
+        fi
+        column_types["$col_name"]=$col_type
+    done
+
+    if [[ -z "$pk_column" ]]; then
+        echo -e "\nError: No primary key defined for table '$tablename'!"
+        return
+    fi
+
+    # Get PK value to update
+    read -p "Enter $pk_column value to update: " pk_value
+    # Check if the row exists
+    if ! grep -q "^$pk_value|" "$table_file"; then
+        echo -e "\nError: No record found with $pk_column = $pk_value!"
+        return
+    fi
+
+    # Read existing row data
+    existing_row=$(grep "^$pk_value|" "$table_file")
+    IFS='|' read -ra existing_values <<< "$existing_row"
+    declare -A current_values
+    index=0
+    for col_def in "${columns[@]}"; do
+        IFS=':' read -r col_name _ <<< "$col_def"
+        if [[ "$col_name" == "PK" ]]; then
+            continue
+        fi
+        current_values["$col_name"]=${existing_values[index]}
+        ((index++))
+    done
+
+    # Prompt for new values
+    declare -A new_values
+    new_values["$pk_column"]=$pk_value  # PK remains unchanged
+    for col_name in "${!column_types[@]}"; do
+        if [[ "$col_name" == "$pk_column" ]]; then
+            continue
+        fi
+        echo -e "\n"
+        read -p "Enter new value for $col_name (${column_types[$col_name]}): " new_value
+        # Validate data type
+        case ${column_types[$col_name]} in
+            "int")
+                if ! [[ "$new_value" =~ ^[0-9]+$ ]]; then
+                    echo -e "\nError: $col_name must be an integer!"
+                    return
+                fi
+                ;;
+            "string")
+                # No validation needed for strings
+                ;;
+            *)
+                echo -e "\nError: Unknown data type ${column_types[$col_name]}!"
+                return
+                ;;
+        esac
+        new_values["$col_name"]=$new_value
+    done
+
+    # Construct new row
+    new_row="$pk_value"
+    for col_def in "${columns[@]}"; do
+        IFS=':' read -r col_name _ <<< "$col_def"
+        if [[ "$col_name" == "PK" ]]; then
+            continue
+        fi
+        if [[ "$col_name" == "$pk_column" ]]; then
+            continue
+        fi
+        new_row+="|${new_values[$col_name]}"
+    done
+
+    # Update the table file
+    grep -v "^$pk_value|" "$table_file" > "$table_file.tmp"
+    echo "$new_row" >> "$table_file.tmp"
+    mv "$table_file.tmp" "$table_file"
+
+    echo -e "\nRow with $pk_column = $pk_value updated successfully."
+}
+
+
+
 # **************************************************
 # ****************** Database Menu Function ********
 # **************************************************
@@ -340,8 +494,10 @@ function database_menu() {
         echo "3) Show Table Schema"
         echo "4) Insert into Table"
         echo "5) Select From Table"
-        echo "6) Drop Table"
-        echo "7) Back to Main Menu"
+        echo "6) Delete From Table"
+        echo "7) Update Table"
+        echo "8) Drop Table"
+        echo "9) Back to Main Menu"
         echo "========================="
         read -p "Enter your choice: " choice
 
@@ -351,8 +507,10 @@ function database_menu() {
             3) show_table_schema "$dbname" ;;
             4) insert_into_table "$dbname" ;;
             5) select_from_table "$dbname" ;;
-            6) drop_table "$dbname" ;;
-            7) return ;;
+            6) delete_from_table "$dbname" ;;
+            7) update_from_table "$dbname" ;;
+            8) drop_table "$dbname" ;;
+            9) return ;;
             *) echo "Invalid option. Please try again." ;;
         esac
 
